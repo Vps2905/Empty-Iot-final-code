@@ -1,0 +1,104 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>BLE + GNSS Command Center</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <link rel="stylesheet" href="/static/style.css"/>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>BLE + GNSS COMMAND CENTER</h1>
+        <div class="sub" id="geofenceLine">Geofence: --</div>
+      </div>
+      <div class="pill" id="socketPill">Socket: connecting</div>
+    </header>
+
+    <section class="cards">
+      <div class="card"><div class="k">TOTAL UNIQUE</div><div class="v" id="totalUnique">0</div><div class="s">ever seen</div></div>
+      <div class="card"><div class="k">ACTIVE DEVICES</div><div class="v" id="activeDevices">0</div><div class="s">&le; 30s</div></div>
+      <div class="card"><div class="k">INSIDE GEOFENCE</div><div class="v" id="insideCount">0</div><div class="s">active now</div></div>
+      <div class="card"><div class="k">AVG RSSI</div><div class="v" id="avgRssi">0.0</div><div class="s">active avg</div></div>
+      <div class="card"><div class="k">AVG DWELL</div><div class="v" id="avgDwell">0.0</div><div class="s">seconds</div></div>
+      <div class="card"><div class="k">EXIT COUNT</div><div class="v" id="exitCount">0</div><div class="s">events</div></div>
+      <div class="card"><div class="k">EXPOSURE COUNT</div><div class="v" id="exposureCount">0</div><div class="s">qualified</div></div>
+    </section>
+
+    <section class="grid">
+      <div class="panel">
+        <div class="panelHead">
+          <div>Live Map</div>
+          <div class="muted" id="mapStatus">Status: --</div>
+        </div>
+        <div id="map"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panelHead">
+          <div>Device Detail</div>
+          <div class="muted" id="detailMac">none</div>
+        </div>
+        <div class="detail" id="detailBox">
+          <div class="row"><span>Status</span><b id="dStatus">-</b></div>
+          <div class="row"><span>Timestamp</span><b id="dTs">-</b></div>
+          <div class="row"><span>RSSI</span><b id="dRssi">-</b></div>
+          <div class="row"><span>Dwell (s)</span><b id="dDwell">-</b></div>
+          <div class="row"><span>GPS</span><b id="dGps">-</b></div>
+          <div class="row"><span>Lat</span><b id="dLat">-</b></div>
+          <div class="row"><span>Lon</span><b id="dLon">-</b></div>
+        </div>
+        <div class="btnRow">
+          <button id="copyBtn">Copy mac_hash</button>
+          <button id="centerBtn">Center map</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panelHead">
+        <div>Devices</div>
+        <div class="muted">Last 500</div>
+      </div>
+
+      <div class="controls">
+        <input id="search" placeholder="Search mac_hash contains..."/>
+        <label><input type="checkbox" id="activeOnly" checked/> Active only</label>
+        <label><input type="checkbox" id="inGeoOnly"/> In geofence only</label>
+        <select id="sort">
+          <option value="last_seen">Sort: Last Seen</option>
+          <option value="rssi">Sort: RSSI</option>
+          <option value="dwell">Sort: Dwell</option>
+        </select>
+        <button id="refreshBtn">Refresh</button>
+      </div>
+
+      <div class="tableWrap">
+        <table id="devTable">
+          <thead>
+            <tr>
+              <th>mac_hash</th>
+              <th>last_seen</th>
+              <th>rssi</th>
+              <th>dwell</th>
+              <th>lat</th>
+              <th>lon</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer class="muted">Demo dashboard — deployed</footer>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
