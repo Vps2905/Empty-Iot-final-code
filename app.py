@@ -96,7 +96,8 @@ def compute_stats():
 
     # avg rssi of active
     if active_devices > 0:
-        avg_rssi = sum([r["avg_rssi"] for r in active_rows if r["avg_rssi"] is not None]) / active_devices
+        vals = [r["avg_rssi"] for r in active_rows if r["avg_rssi"] is not None]
+        avg_rssi = (sum(vals) / len(vals)) if vals else 0.0
     else:
         avg_rssi = 0.0
 
@@ -143,7 +144,7 @@ def compute_stats():
         "inside_geofence": inside_count,
         "avg_rssi": float(avg_rssi),
         "avg_dwell": float(avg_dwell),
-        "enter_count": 0,  # optional: implement enter logic later
+        "enter_count": 0,
         "exit_count": exit_count,
         "exposure_count": exposure_count,
     }
@@ -214,6 +215,33 @@ def api_device(mac_hash):
     return jsonify(rows)
 
 
+def _normalize_event(ev: dict) -> dict:
+    """
+    Accept both ESP32-style fields and older schema.
+    ESP32 sends: timestamp_epoch, timestamp_utc
+    Backend stores epoch in 'timestamp'
+    """
+    ts = ev.get("timestamp")
+    if ts is None:
+        ts = ev.get("timestamp_epoch")  # <-- FIX: accept firmware key
+
+    # lat/lon may come as null
+    return {
+        "timestamp": ts,
+        "mac_hash": ev.get("mac_hash"),
+        "rssi": ev.get("rssi"),
+        "lat": ev.get("lat"),
+        "lon": ev.get("lon"),
+        "dwell_time_sec": ev.get("dwell_time_sec"),
+        "campaign_id": str(ev.get("campaign_id")) if ev.get("campaign_id") is not None else None,
+        "activation_name": ev.get("activation_name"),
+        "asset_id": ev.get("asset_id"),
+        "creative_id": ev.get("creative_id"),
+        "timestamp_start_utc": ev.get("timestamp_start_utc"),
+        "timestamp_end_utc": ev.get("timestamp_end_utc"),
+    }
+
+
 @app.post("/ingest")
 def ingest():
     """
@@ -239,7 +267,13 @@ def ingest():
     for ev in events:
         if not isinstance(ev, dict):
             continue
-        last_event = ev
+
+        norm = _normalize_event(ev)
+        last_event = norm
+
+        # IMPORTANT: If mac_hash is missing, skip (prevents blank rows)
+        if norm["mac_hash"] is None:
+            continue
 
         cur.execute("""
           INSERT INTO events (
@@ -248,34 +282,32 @@ def ingest():
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             received_ts,
-            ev.get("timestamp"),
-            ev.get("mac_hash"),
-            ev.get("rssi"),
-            ev.get("lat"),
-            ev.get("lon"),
-            ev.get("dwell_time_sec"),
-            str(ev.get("campaign_id")) if ev.get("campaign_id") is not None else None,
-            ev.get("activation_name"),
-            ev.get("asset_id"),
-            ev.get("creative_id"),
-            ev.get("timestamp_start_utc"),
-            ev.get("timestamp_end_utc"),
+            norm["timestamp"],
+            norm["mac_hash"],
+            norm["rssi"],
+            norm["lat"],
+            norm["lon"],
+            norm["dwell_time_sec"],
+            norm["campaign_id"],
+            norm["activation_name"],
+            norm["asset_id"],
+            norm["creative_id"],
+            norm["timestamp_start_utc"],
+            norm["timestamp_end_utc"],
         ))
         inserted += 1
 
     con.commit()
     con.close()
 
-    # Emit live update event (works when the client is connected)
-    socketio.emit("ingest", {"count": inserted, "last": last_event, "stats": compute_stats()})
+    # quick server-side log (shows in Railway logs)
+    app.logger.info("INGEST from %s inserted=%d", request.remote_addr, inserted)
 
+    socketio.emit("ingest", {"count": inserted, "last": last_event, "stats": compute_stats()})
     return jsonify({"ok": True, "inserted": inserted})
 
 
 if __name__ == "__main__":
     init_db()
     port = int(os.environ.get("PORT", "5050"))
-
-    # On Flask 3, SocketIO in threading mode uses Werkzeug dev server.
-    # allow_unsafe_werkzeug=True suppresses the warning for demo use.
     socketio.run(app, host="0.0.0.0", port=port, allow_unsafe_werkzeug=True)
