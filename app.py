@@ -1,9 +1,9 @@
 import os
 import time
 import sqlite3
-import io
 import csv
 import json
+from io import StringIO
 from math import radians, sin, cos, sqrt, atan2
 
 from flask import Flask, request, jsonify, render_template, Response
@@ -23,7 +23,6 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret")
 
 # IMPORTANT: eventlet breaks on Python 3.13 on Windows.
-# Force threading async mode (works for demo + deploy; browser still "live" via polling + emits where supported).
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 
@@ -111,7 +110,7 @@ def compute_stats():
     """)
     avg_dwell = cur.fetchone()["avg_dwell"] or 0.0
 
-    # event counts (last 24h)
+    # exit/exposure counts (last 24h)
     since = now - 24 * 3600
     cur.execute("SELECT COUNT(*) AS n FROM events WHERE received_ts >= ?", (since,))
     exit_count = cur.fetchone()["n"] or 0
@@ -147,7 +146,7 @@ def compute_stats():
         "inside_geofence": inside_count,
         "avg_rssi": float(avg_rssi),
         "avg_dwell": float(avg_dwell),
-        "enter_count": 0,  # optional: implement enter logic later
+        "enter_count": 0,
         "exit_count": exit_count,
         "exposure_count": exposure_count,
     }
@@ -218,91 +217,91 @@ def api_device(mac_hash):
     return jsonify(rows)
 
 
-# =====================================================
-# DOWNLOAD HELPERS + ROUTES
-# =====================================================
-def fetch_events(limit: int = 5000, since_ts: int | None = None):
+# ==========================
+# EXPORT ROUTES (NEW)
+# ==========================
+@app.get("/export.csv")
+def export_csv():
+    """
+    Downloads CSV built from DB (no local filesystem needed).
+    Optional params:
+      - limit=100000
+    """
+    limit = int(request.args.get("limit", "100000"))
+
     con = db()
     cur = con.cursor()
-
-    if since_ts is not None:
-        cur.execute("""
-          SELECT id, received_ts, timestamp, mac_hash, rssi, lat, lon, dwell_time_sec,
-                 campaign_id, activation_name, asset_id, creative_id, timestamp_start_utc, timestamp_end_utc
-          FROM events
-          WHERE received_ts >= ?
-          ORDER BY id DESC
-          LIMIT ?
-        """, (since_ts, limit))
-    else:
-        cur.execute("""
-          SELECT id, received_ts, timestamp, mac_hash, rssi, lat, lon, dwell_time_sec,
-                 campaign_id, activation_name, asset_id, creative_id, timestamp_start_utc, timestamp_end_utc
-          FROM events
-          ORDER BY id DESC
-          LIMIT ?
-        """, (limit,))
-
-    rows = [dict(r) for r in cur.fetchall()]
+    cur.execute("""
+      SELECT id, received_ts, timestamp, mac_hash, rssi, lat, lon, dwell_time_sec,
+             campaign_id, activation_name, asset_id, creative_id, timestamp_start_utc, timestamp_end_utc
+      FROM events
+      ORDER BY id ASC
+      LIMIT ?
+    """, (limit,))
+    rows = cur.fetchall()
     con.close()
-    return rows
 
-
-@app.get("/download/events.json")
-def download_events_json():
-    limit = int(request.args.get("limit", "5000"))
-    since = request.args.get("since")  # epoch seconds (received_ts)
-    since_ts = int(since) if since is not None else None
-
-    rows = fetch_events(limit=limit, since_ts=since_ts)
-
-    body = json.dumps(rows, separators=(",", ":"), ensure_ascii=False)
-    filename = "events.json"
-
-    return Response(
-        body,
-        mimetype="application/json",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-@app.get("/download/events.csv")
-def download_events_csv():
-    limit = int(request.args.get("limit", "5000"))
-    since = request.args.get("since")  # epoch seconds (received_ts)
-    since_ts = int(since) if since is not None else None
-
-    rows = fetch_events(limit=limit, since_ts=since_ts)
-    filename = "events.csv"
-
-    fieldnames = [
-        "id", "received_ts", "timestamp", "mac_hash", "rssi", "lat", "lon", "dwell_time_sec",
-        "campaign_id", "activation_name", "asset_id", "creative_id", "timestamp_start_utc", "timestamp_end_utc"
+    header = [
+        "id","received_ts","timestamp","mac_hash","rssi","lat","lon","dwell_time_sec",
+        "campaign_id","activation_name","asset_id","creative_id","timestamp_start_utc","timestamp_end_utc"
     ]
 
-    buf = io.StringIO()
-    w = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
-    w.writeheader()
+    out = StringIO()
+    w = csv.writer(out)
+    w.writerow(header)
     for r in rows:
-        w.writerow(r)
+        w.writerow([r[h] for h in header])
 
+    filename = f"events_{int(time.time())}.csv"
     return Response(
-        buf.getvalue(),
+        out.getvalue(),
         mimetype="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
 
-# =====================================================
-# INGEST
-# =====================================================
+@app.get("/export.jsonl")
+def export_jsonl():
+    """
+    Downloads NDJSON (JSON lines) built from DB.
+    Optional params:
+      - limit=100000
+    """
+    limit = int(request.args.get("limit", "100000"))
+
+    con = db()
+    cur = con.cursor()
+    cur.execute("""
+      SELECT id, received_ts, timestamp, mac_hash, rssi, lat, lon, dwell_time_sec,
+             campaign_id, activation_name, asset_id, creative_id, timestamp_start_utc, timestamp_end_utc
+      FROM events
+      ORDER BY id ASC
+      LIMIT ?
+    """, (limit,))
+    rows = cur.fetchall()
+    con.close()
+
+    def gen():
+        for r in rows:
+            yield json.dumps(dict(r), ensure_ascii=False) + "\n"
+
+    filename = f"events_{int(time.time())}.jsonl"
+    return Response(
+        gen(),
+        mimetype="application/x-ndjson",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
 def _normalize_event(ev: dict) -> dict:
-    # Accept both ESP32-style fields and older schema.
-    # ESP32 sends: timestamp_epoch, timestamp_utc
-    # Backend stores epoch in 'timestamp'
+    """
+    Accept both ESP32-style fields and older schema.
+    ESP32 sends: timestamp_epoch, timestamp_utc
+    Backend stores epoch in 'timestamp'
+    """
     ts = ev.get("timestamp")
     if ts is None:
-        ts = ev.get("timestamp_epoch")
+        ts = ev.get("timestamp_epoch")  # accept firmware key
 
     return {
         "timestamp": ts,
@@ -322,11 +321,6 @@ def _normalize_event(ev: dict) -> dict:
 
 @app.post("/ingest")
 def ingest():
-    """
-    Accept:
-      - single event JSON
-      - OR {"events":[...]} batch
-    """
     payload = request.get_json(force=True, silent=True)
     if payload is None:
         return jsonify({"ok": False, "error": "invalid json"}), 400
@@ -349,7 +343,6 @@ def ingest():
         norm = _normalize_event(ev)
         last_event = norm
 
-        # Skip invalid rows
         if norm["mac_hash"] is None:
             continue
 
@@ -380,16 +373,11 @@ def ingest():
 
     app.logger.info("INGEST from %s inserted=%d", request.remote_addr, inserted)
 
-    # Emit live update event (works when the client is connected)
     socketio.emit("ingest", {"count": inserted, "last": last_event, "stats": compute_stats()})
-
     return jsonify({"ok": True, "inserted": inserted})
 
 
 if __name__ == "__main__":
     init_db()
     port = int(os.environ.get("PORT", "5050"))
-
-    # On Flask 3, SocketIO in threading mode uses Werkzeug dev server.
-    # allow_unsafe_werkzeug=True suppresses the warning for demo use.
     socketio.run(app, host="0.0.0.0", port=port, allow_unsafe_werkzeug=True)

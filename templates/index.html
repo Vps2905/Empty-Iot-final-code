@@ -10,6 +10,22 @@
 
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <link rel="stylesheet" href="/static/style.css"/>
+
+  <style>
+    /* small button style that matches your UI */
+    .exportRow{ display:flex; gap:10px; align-items:center; justify-content:flex-end; margin-top:6px; }
+    .exportBtn{
+      padding:10px 12px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,0.2);
+      background: rgba(0,0,0,0.25);
+      color: #fff;
+      cursor: pointer;
+      text-decoration:none;
+      font-size:14px;
+    }
+    .exportBtn:hover{ opacity:0.85; }
+  </style>
 </head>
 <body>
   <div class="wrap">
@@ -18,7 +34,16 @@
         <h1>BLE + GNSS COMMAND CENTER</h1>
         <div class="sub" id="geofenceLine">Geofence: --</div>
       </div>
-      <div class="pill" id="socketPill">Socket: connecting</div>
+
+      <div style="display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
+        <div class="pill" id="socketPill">Socket: connecting</div>
+
+        <!-- NEW EXPORT BUTTONS -->
+        <div class="exportRow">
+          <a class="exportBtn" href="/export.csv" target="_blank">Export CSV</a>
+          <a class="exportBtn" href="/export.jsonl" target="_blank">Export JSONL</a>
+        </div>
+      </div>
     </header>
 
     <section class="cards">
