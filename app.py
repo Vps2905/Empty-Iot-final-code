@@ -192,7 +192,6 @@ def init_db():
     )
     """)
 
-    # Safe migrations for older databases
     ensure_column(cur, "events", "event_id", "TEXT")
     ensure_column(cur, "events", "schema_version", "TEXT")
     ensure_column(cur, "events", "event_type", "TEXT")
