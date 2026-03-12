@@ -12,8 +12,14 @@
   <link rel="stylesheet" href="/static/style.css"/>
 
   <style>
-    /* small button style that matches your UI */
-    .exportRow{ display:flex; gap:10px; align-items:center; justify-content:flex-end; margin-top:6px; }
+    .exportRow{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:flex-end;
+      margin-top:6px;
+      flex-wrap:wrap;
+    }
     .exportBtn{
       padding:10px 12px;
       border-radius:10px;
@@ -38,7 +44,6 @@
       <div style="display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
         <div class="pill" id="socketPill">Socket: connecting</div>
 
-        <!-- NEW EXPORT BUTTONS -->
         <div class="exportRow">
           <a class="exportBtn" href="/export.csv" target="_blank">Export CSV</a>
           <a class="exportBtn" href="/export.jsonl" target="_blank">Export JSONL</a>
@@ -52,8 +57,9 @@
       <div class="card"><div class="k">INSIDE GEOFENCE</div><div class="v" id="insideCount">0</div><div class="s">active now</div></div>
       <div class="card"><div class="k">AVG RSSI</div><div class="v" id="avgRssi">0.0</div><div class="s">active avg</div></div>
       <div class="card"><div class="k">AVG DWELL</div><div class="v" id="avgDwell">0.0</div><div class="s">seconds</div></div>
-      <div class="card"><div class="k">EXIT COUNT</div><div class="v" id="exitCount">0</div><div class="s">events</div></div>
-      <div class="card"><div class="k">EXPOSURE COUNT</div><div class="v" id="exposureCount">0</div><div class="s">qualified</div></div>
+      <div class="card"><div class="k">PRESENCE COUNT</div><div class="v" id="presenceCount">0</div><div class="s">24h</div></div>
+      <div class="card"><div class="k">EXPOSURE EXIT COUNT</div><div class="v" id="exitCount">0</div><div class="s">24h</div></div>
+      <div class="card"><div class="k">EXPOSURE COUNT</div><div class="v" id="exposureCount">0</div><div class="s">qualified 24h</div></div>
     </section>
 
     <section class="grid">
@@ -72,10 +78,14 @@
         </div>
         <div class="detail" id="detailBox">
           <div class="row"><span>Status</span><b id="dStatus">-</b></div>
+          <div class="row"><span>Event Type</span><b id="dType">-</b></div>
           <div class="row"><span>Timestamp</span><b id="dTs">-</b></div>
           <div class="row"><span>RSSI</span><b id="dRssi">-</b></div>
           <div class="row"><span>Dwell (s)</span><b id="dDwell">-</b></div>
           <div class="row"><span>GPS</span><b id="dGps">-</b></div>
+          <div class="row"><span>Inside Geofence</span><b id="dGeo">-</b></div>
+          <div class="row"><span>Qualified Exposure</span><b id="dQualified">-</b></div>
+          <div class="row"><span>Signal Source</span><b id="dSignalSource">-</b></div>
           <div class="row"><span>Lat</span><b id="dLat">-</b></div>
           <div class="row"><span>Lon</span><b id="dLon">-</b></div>
         </div>
@@ -89,7 +99,7 @@
     <section class="panel">
       <div class="panelHead">
         <div>Devices</div>
-        <div class="muted">Last 500</div>
+        <div class="muted">Latest by mac_hash</div>
       </div>
 
       <div class="controls">
@@ -110,8 +120,12 @@
             <tr>
               <th>mac_hash</th>
               <th>last_seen</th>
+              <th>event_type</th>
+              <th>signal_source</th>
               <th>rssi</th>
               <th>dwell</th>
+              <th>inside_geofence</th>
+              <th>qualified</th>
               <th>lat</th>
               <th>lon</th>
             </tr>
@@ -121,7 +135,7 @@
       </div>
     </section>
 
-    <footer class="muted">Demo dashboard — deployed</footer>
+    <footer class="muted">BLE + GNSS dashboard — Railway ready</footer>
   </div>
 
   <script src="/static/app.js"></script>

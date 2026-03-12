@@ -7,7 +7,7 @@ import hashlib
 from io import StringIO
 from math import radians, sin, cos, sqrt, atan2
 
-from flask import Flask, request, jsonify, Response, send_from_directory
+from flask import Flask, request, jsonify, Response, send_from_directory, abort
 from flask_socketio import SocketIO
 
 DB_PATH = os.environ.get("DB_PATH", "footfall.db")
@@ -21,8 +21,8 @@ ACTIVE_WINDOW_SEC = int(os.environ.get("ACTIVE_WINDOW_SEC", "30"))
 EXPOSURE_DWELL_SEC = int(os.environ.get("EXPOSURE_DWELL_SEC", "10"))
 EXPOSURE_RSSI_MIN = int(os.environ.get("EXPOSURE_RSSI_MIN", "-85"))
 
-DEVICE_TOKEN = os.environ.get("DEVICE_TOKEN", "replace_with_real_device_token")
-ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "replace_with_real_admin_token")
+DEVICE_TOKEN = os.environ.get("DEVICE_TOKEN", "my_test_token_123")
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "vps_2905")
 
 GT_ENABLED = os.environ.get("GT_ENABLED", "false").lower() == "true"
 GT_API_URL = os.environ.get("GT_API_URL", "")
@@ -30,18 +30,23 @@ GT_API_TOKEN = os.environ.get("GT_API_TOKEN", "")
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret")
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 os.makedirs(FIRMWARE_DIR, exist_ok=True)
 
 
 def db():
-    # Write-Ahead Logging (WAL) enabled for safe concurrent writes
-    con = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=15.0)
-    con.execute("PRAGMA journal_mode=WAL")
-    con.execute("PRAGMA synchronous=NORMAL")
+    con = sqlite3.connect(DB_PATH, check_same_thread=False)
     con.row_factory = sqlite3.Row
     return con
+
+
+def parse_limit(value, default=200, minimum=1, maximum=100000):
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, n))
 
 
 def column_exists(cur, table_name, column_name):
@@ -295,7 +300,10 @@ def haversine_m(lat1, lon1, lat2, lon2):
 def geofence_distance(lat, lon):
     if lat is None or lon is None:
         return None
-    return haversine_m(lat, lon, GEOFENCE_LAT, GEOFENCE_LON)
+    try:
+        return haversine_m(float(lat), float(lon), GEOFENCE_LAT, GEOFENCE_LON)
+    except (TypeError, ValueError):
+        return None
 
 
 def inside_geofence(lat, lon):
@@ -320,7 +328,10 @@ def qualifies_exposure(ev):
         return False
     if rssi is None:
         return False
-    if int(rssi) < EXPOSURE_RSSI_MIN:
+    try:
+        if int(rssi) < EXPOSURE_RSSI_MIN:
+            return False
+    except (TypeError, ValueError):
         return False
     return True
 
@@ -508,6 +519,7 @@ def compute_stats():
     con = db()
     cur = con.cursor()
     now = int(time.time())
+    since_24h = now - 24 * 3600
 
     cur.execute("SELECT COUNT(DISTINCT mac_hash) AS n FROM events WHERE mac_hash IS NOT NULL")
     total_unique = cur.fetchone()["n"] or 0
@@ -528,7 +540,8 @@ def compute_stats():
     cur.execute("""
       SELECT AVG(dwell_time_sec) AS avg_dwell
       FROM (
-        SELECT dwell_time_sec FROM events
+        SELECT dwell_time_sec
+        FROM events
         WHERE dwell_time_sec IS NOT NULL
         ORDER BY id DESC
         LIMIT 200
@@ -536,15 +549,25 @@ def compute_stats():
     """)
     avg_dwell = cur.fetchone()["avg_dwell"] or 0.0
 
-    since = now - 24 * 3600
-    cur.execute("SELECT COUNT(*) AS n FROM events WHERE received_ts >= ?", (since,))
-    exit_count = cur.fetchone()["n"] or 0
+    cur.execute("""
+      SELECT COUNT(*) AS n
+      FROM events
+      WHERE received_ts >= ? AND event_type = 'presence'
+    """, (since_24h,))
+    presence_count = cur.fetchone()["n"] or 0
+
+    cur.execute("""
+      SELECT COUNT(*) AS n
+      FROM events
+      WHERE received_ts >= ? AND event_type = 'exposure_exit'
+    """, (since_24h,))
+    exposure_exit_count = cur.fetchone()["n"] or 0
 
     cur.execute("""
       SELECT COUNT(*) AS n
       FROM events
       WHERE received_ts >= ? AND qualified_exposure = 1
-    """, (since,))
+    """, (since_24h,))
     exposure_count = cur.fetchone()["n"] or 0
 
     cur.execute("""
@@ -578,15 +601,24 @@ def compute_stats():
         "inside_geofence": inside_count,
         "avg_rssi": float(avg_rssi),
         "avg_dwell": float(avg_dwell),
-        "enter_count": 0,
-        "exit_count": exit_count,
+        "presence_count": presence_count,
+        "exposure_exit_count": exposure_exit_count,
         "exposure_count": exposure_count,
     }
 
 
 @app.get("/")
 def home():
-    return send_from_directory("templates", "index.html")
+    return send_from_directory(app.template_folder, "index.html")
+
+
+@app.get("/health")
+def health():
+    return jsonify({
+        "ok": True,
+        "service": "ble-gnss-command-center",
+        "ts": int(time.time())
+    })
 
 
 @app.get("/api/stats")
@@ -596,7 +628,7 @@ def api_stats():
 
 @app.get("/api/events")
 def api_events():
-    limit = int(request.args.get("limit", "200"))
+    limit = parse_limit(request.args.get("limit"), default=200, maximum=5000)
     con = db()
     cur = con.cursor()
     cur.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,))
@@ -607,6 +639,7 @@ def api_events():
 
 @app.get("/api/devices")
 def api_devices():
+    limit = parse_limit(request.args.get("limit"), default=500, maximum=5000)
     con = db()
     cur = con.cursor()
     cur.execute("""
@@ -620,8 +653,8 @@ def api_devices():
       ) x
       ON e.id = x.max_id
       ORDER BY e.received_ts DESC
-      LIMIT 500
-    """)
+      LIMIT ?
+    """, (limit,))
     rows = [dict(r) for r in cur.fetchall()]
     con.close()
     return jsonify(rows)
@@ -629,6 +662,7 @@ def api_devices():
 
 @app.get("/api/device/<mac_hash>")
 def api_device(mac_hash):
+    limit = parse_limit(request.args.get("limit"), default=200, maximum=2000)
     con = db()
     cur = con.cursor()
     cur.execute("""
@@ -636,8 +670,8 @@ def api_device(mac_hash):
       FROM events
       WHERE mac_hash = ?
       ORDER BY id DESC
-      LIMIT 200
-    """, (mac_hash,))
+      LIMIT ?
+    """, (mac_hash, limit))
     rows = [dict(r) for r in cur.fetchall()]
     con.close()
     return jsonify(rows)
@@ -662,7 +696,7 @@ def api_gt_queue():
 
 @app.get("/export.csv")
 def export_csv():
-    limit = int(request.args.get("limit", "100000"))
+    limit = parse_limit(request.args.get("limit"), default=100000, maximum=200000)
     con = db()
     cur = con.cursor()
     cur.execute("SELECT * FROM events ORDER BY id ASC LIMIT ?", (limit,))
@@ -689,7 +723,7 @@ def export_csv():
 
 @app.get("/export.jsonl")
 def export_jsonl():
-    limit = int(request.args.get("limit", "100000"))
+    limit = parse_limit(request.args.get("limit"), default=100000, maximum=200000)
     con = db()
     cur = con.cursor()
     cur.execute("SELECT * FROM events ORDER BY id ASC LIMIT ?", (limit,))
@@ -727,16 +761,19 @@ def ingest():
 
     inserted = 0
     duplicates = 0
+    skipped = 0
     last_event = None
 
     for ev in events:
         if not isinstance(ev, dict):
+            skipped += 1
             continue
 
         norm = normalize_event(ev)
         last_event = norm
 
         if not norm["event_id"] or not norm["mac_hash"] or not norm["device_id"]:
+            skipped += 1
             continue
 
         try:
@@ -776,11 +813,17 @@ def ingest():
     socketio.emit("ingest", {
         "count": inserted,
         "duplicates": duplicates,
+        "skipped": skipped,
         "last": last_event,
         "stats": compute_stats()
     })
 
-    return jsonify({"ok": True, "inserted": inserted, "duplicates": duplicates})
+    return jsonify({
+        "ok": True,
+        "inserted": inserted,
+        "duplicates": duplicates,
+        "skipped": skipped
+    })
 
 
 @app.post("/heartbeat")
@@ -985,10 +1028,17 @@ def admin_ota_release():
     force_update = 1 if payload.get("force_update") else 0
     min_fw_version = payload.get("min_fw_version")
 
+    if rollout_percent < 0 or rollout_percent > 100:
+        return jsonify({"ok": False, "error": "rollout_percent must be 0..100"}), 400
+
     if not version or not binary_filename:
         return jsonify({"ok": False, "error": "version and binary_filename required"}), 400
 
-    full_path = os.path.join(FIRMWARE_DIR, binary_filename)
+    full_path = os.path.abspath(os.path.join(FIRMWARE_DIR, binary_filename))
+    firmware_root = os.path.abspath(FIRMWARE_DIR)
+    if not full_path.startswith(firmware_root):
+        return jsonify({"ok": False, "error": "invalid firmware filename"}), 400
+
     if not os.path.exists(full_path):
         return jsonify({"ok": False, "error": "firmware file not found"}), 404
 
@@ -1083,6 +1133,12 @@ def admin_gt_flush():
 
 @app.get("/firmware/<path:filename>")
 def firmware_download(filename):
+    full_path = os.path.abspath(os.path.join(FIRMWARE_DIR, filename))
+    firmware_root = os.path.abspath(FIRMWARE_DIR)
+    if not full_path.startswith(firmware_root):
+        abort(404)
+    if not os.path.exists(full_path):
+        abort(404)
     return send_from_directory(FIRMWARE_DIR, filename, as_attachment=True)
 
 
@@ -1090,4 +1146,4 @@ init_db()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5050"))
-    socketio.run(app, host="0.0.0.0", port=port)
+    socketio.run(app, host="0.0.0.0", port=port, allow_unsafe_werkzeug=True)
