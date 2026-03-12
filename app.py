@@ -614,11 +614,7 @@ def home():
 
 @app.get("/health")
 def health():
-    return jsonify({
-        "ok": True,
-        "service": "ble-gnss-command-center",
-        "ts": int(time.time())
-    })
+    return jsonify({"ok": True, "service": "ble-gnss-command-center", "ts": int(time.time())})
 
 
 @app.get("/api/stats")
@@ -672,23 +668,6 @@ def api_device(mac_hash):
       ORDER BY id DESC
       LIMIT ?
     """, (mac_hash, limit))
-    rows = [dict(r) for r in cur.fetchall()]
-    con.close()
-    return jsonify(rows)
-
-
-@app.get("/api/partner/groundtruth/queue")
-def api_gt_queue():
-    con = db()
-    cur = con.cursor()
-    cur.execute("""
-      SELECT id, partner_name, event_id, device_id, status, attempt_count,
-             response_code, created_ts, last_attempt_ts
-      FROM partner_deliveries
-      WHERE partner_name = 'groundtruth'
-      ORDER BY id DESC
-      LIMIT 500
-    """)
     rows = [dict(r) for r in cur.fetchall()]
     con.close()
     return jsonify(rows)
@@ -803,7 +782,6 @@ def ingest():
 
             if norm["qualified_exposure"] == 1:
                 enqueue_groundtruth_delivery(cur, norm)
-
         except sqlite3.IntegrityError:
             duplicates += 1
 
@@ -818,12 +796,7 @@ def ingest():
         "stats": compute_stats()
     })
 
-    return jsonify({
-        "ok": True,
-        "inserted": inserted,
-        "duplicates": duplicates,
-        "skipped": skipped
-    })
+    return jsonify({"ok": True, "inserted": inserted, "duplicates": duplicates, "skipped": skipped})
 
 
 @app.post("/heartbeat")
@@ -1009,126 +982,6 @@ def ota_report():
     con.commit()
     con.close()
     return jsonify({"ok": True})
-
-
-@app.post("/admin/ota/release")
-def admin_ota_release():
-    if not admin_auth_ok(request):
-        return jsonify({"ok": False, "error": "unauthorized"}), 401
-
-    payload = request.get_json(force=True, silent=True)
-    if payload is None:
-        return jsonify({"ok": False, "error": "invalid json"}), 400
-
-    version = payload.get("version")
-    channel = payload.get("channel", "stable")
-    binary_filename = payload.get("binary_filename")
-    notes = payload.get("notes", "")
-    rollout_percent = int(payload.get("rollout_percent", 100))
-    force_update = 1 if payload.get("force_update") else 0
-    min_fw_version = payload.get("min_fw_version")
-
-    if rollout_percent < 0 or rollout_percent > 100:
-        return jsonify({"ok": False, "error": "rollout_percent must be 0..100"}), 400
-
-    if not version or not binary_filename:
-        return jsonify({"ok": False, "error": "version and binary_filename required"}), 400
-
-    full_path = os.path.abspath(os.path.join(FIRMWARE_DIR, binary_filename))
-    firmware_root = os.path.abspath(FIRMWARE_DIR)
-    if not full_path.startswith(firmware_root):
-        return jsonify({"ok": False, "error": "invalid firmware filename"}), 400
-
-    if not os.path.exists(full_path):
-        return jsonify({"ok": False, "error": "firmware file not found"}), 404
-
-    with open(full_path, "rb") as f:
-        data = f.read()
-
-    sha256 = hashlib.sha256(data).hexdigest()
-    size = len(data)
-    now_ts = int(time.time())
-
-    con = db()
-    cur = con.cursor()
-
-    cur.execute("""
-      INSERT INTO ota_releases (
-        version, channel, min_fw_version, binary_filename, binary_sha256,
-        binary_size, notes, rollout_percent, force_update, active, created_ts
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-    """, (
-        version, channel, min_fw_version, binary_filename, sha256,
-        size, notes, rollout_percent, force_update, now_ts
-    ))
-
-    con.commit()
-    con.close()
-
-    return jsonify({
-        "ok": True,
-        "version": version,
-        "channel": channel,
-        "binary_filename": binary_filename,
-        "binary_sha256": sha256,
-        "binary_size": size
-    })
-
-
-@app.post("/admin/partner/groundtruth/flush")
-def admin_gt_flush():
-    if not admin_auth_ok(request):
-        return jsonify({"ok": False, "error": "unauthorized"}), 401
-
-    con = db()
-    cur = con.cursor()
-
-    cur.execute("""
-      SELECT * FROM partner_deliveries
-      WHERE partner_name = 'groundtruth' AND status IN ('queued', 'retry')
-      ORDER BY id ASC
-      LIMIT 500
-    """)
-    rows = cur.fetchall()
-
-    sent = 0
-    failed = 0
-
-    for r in rows:
-        pid = r["id"]
-        attempt_no = (r["attempt_count"] or 0) + 1
-        now_ts = int(time.time())
-
-        if not GT_ENABLED or not GT_API_URL:
-            status = "simulated_sent"
-            response_code = 200
-            response_body = "GT disabled; simulated success"
-        else:
-            status = "queued_external"
-            response_code = 202
-            response_body = "placeholder external delivery"
-
-        cur.execute("""
-          UPDATE partner_deliveries
-          SET status = ?, attempt_count = ?, response_code = ?, response_body = ?, last_attempt_ts = ?
-          WHERE id = ?
-        """, (status, attempt_no, response_code, response_body, now_ts, pid))
-
-        cur.execute("""
-          INSERT INTO partner_delivery_attempts (
-            partner_delivery_id, attempt_no, request_ts, response_code, response_body, status
-          ) VALUES (?, ?, ?, ?, ?, ?)
-        """, (pid, attempt_no, now_ts, response_code, response_body, status))
-
-        if status in ("simulated_sent", "queued_external"):
-            sent += 1
-        else:
-            failed += 1
-
-    con.commit()
-    con.close()
-
-    return jsonify({"ok": True, "processed": len(rows), "sent": sent, "failed": failed})
 
 
 @app.get("/firmware/<path:filename>")
