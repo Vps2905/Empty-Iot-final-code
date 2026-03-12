@@ -30,13 +30,16 @@ GT_API_TOKEN = os.environ.get("GT_API_TOKEN", "")
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret")
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
 os.makedirs(FIRMWARE_DIR, exist_ok=True)
 
 
 def db():
-    con = sqlite3.connect(DB_PATH, check_same_thread=False)
+    # Write-Ahead Logging (WAL) enabled for safe concurrent writes
+    con = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=15.0)
+    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA synchronous=NORMAL")
     con.row_factory = sqlite3.Row
     return con
 
@@ -1087,4 +1090,4 @@ init_db()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5050"))
-    socketio.run(app, host="0.0.0.0", port=port, allow_unsafe_werkzeug=True)
+    socketio.run(app, host="0.0.0.0", port=port)

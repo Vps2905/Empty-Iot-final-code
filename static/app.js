@@ -64,8 +64,6 @@ function applyFilters(devs, stats){
 
   function inGeo(d){
     if (d.lat === null || d.lon === null || d.lat === undefined || d.lon === undefined) return false;
-    // approximation: use backend geofence center, not device location
-    // frontend filter is best-effort; backend stats are authoritative
     return true;
   }
 
@@ -94,7 +92,6 @@ async function loadAll(){
   const tbody = document.querySelector("#devTable tbody");
   tbody.innerHTML = filtered.map(rowHTML).join("");
 
-  // click row -> detail
   document.querySelectorAll("#devTable tbody tr").forEach(tr=>{
     tr.addEventListener("click", async ()=>{
       selectedMac = tr.getAttribute("data-mac");
@@ -143,8 +140,10 @@ function wireSocket(){
   socket.on("connect", ()=> setPill("Socket: connected", true));
   socket.on("disconnect", ()=> setPill("Socket: disconnected", false));
   socket.on("ingest", (msg)=>{
-    // fast refresh on ingest
-    loadAll().catch(()=>{});
+    // Update frontend cards dynamically without triggering heavy API calls
+    if (msg && msg.stats) {
+      updateCards(msg.stats);
+    }
   });
 }
 
@@ -152,5 +151,6 @@ function wireSocket(){
   wireUI();
   wireSocket();
   await loadAll();
+  // Safe, controlled polling every 5 seconds
   setInterval(()=>loadAll().catch(()=>{}), 5000);
 })();
