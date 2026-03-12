@@ -24,7 +24,6 @@ EXPOSURE_RSSI_MIN = int(os.environ.get("EXPOSURE_RSSI_MIN", "-85"))
 DEVICE_TOKEN = os.environ.get("DEVICE_TOKEN", "replace_with_real_device_token")
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "replace_with_real_admin_token")
 
-# GroundTruth handoff
 GT_ENABLED = os.environ.get("GT_ENABLED", "false").lower() == "true"
 GT_API_URL = os.environ.get("GT_API_URL", "")
 GT_API_TOKEN = os.environ.get("GT_API_TOKEN", "")
@@ -40,6 +39,26 @@ def db():
     con = sqlite3.connect(DB_PATH, check_same_thread=False)
     con.row_factory = sqlite3.Row
     return con
+
+
+def column_exists(cur, table_name, column_name):
+    cur.execute(f"PRAGMA table_info({table_name})")
+    cols = [row[1] for row in cur.fetchall()]
+    return column_name in cols
+
+
+def ensure_column(cur, table_name, column_name, column_def):
+    if not column_exists(cur, table_name, column_name):
+        cur.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_def}")
+
+
+def ensure_events_received_ts(cur):
+    if not column_exists(cur, "events", "received_ts"):
+        ensure_column(cur, "events", "received_ts", "INTEGER")
+        cur.execute(
+            "UPDATE events SET received_ts = COALESCE(timestamp, strftime('%s','now')) "
+            "WHERE received_ts IS NULL"
+        )
 
 
 def init_db():
@@ -173,10 +192,71 @@ def init_db():
     )
     """)
 
+    # Safe migrations for older databases
+    ensure_column(cur, "events", "event_id", "TEXT")
+    ensure_column(cur, "events", "schema_version", "TEXT")
+    ensure_column(cur, "events", "event_type", "TEXT")
+    ensure_events_received_ts(cur)
+    ensure_column(cur, "events", "timestamp", "INTEGER")
+    ensure_column(cur, "events", "timestamp_utc", "TEXT")
+    ensure_column(cur, "events", "session_start_epoch", "INTEGER")
+    ensure_column(cur, "events", "session_end_epoch", "INTEGER")
+    ensure_column(cur, "events", "session_start_utc", "TEXT")
+    ensure_column(cur, "events", "session_end_utc", "TEXT")
+    ensure_column(cur, "events", "mac_hash", "TEXT")
+    ensure_column(cur, "events", "signal_source", "TEXT")
+    ensure_column(cur, "events", "rssi", "INTEGER")
+    ensure_column(cur, "events", "dwell_time_sec", "INTEGER")
+    ensure_column(cur, "events", "gps_fix", "INTEGER")
+    ensure_column(cur, "events", "lat", "REAL")
+    ensure_column(cur, "events", "lon", "REAL")
+    ensure_column(cur, "events", "distance_to_geofence_m", "REAL")
+    ensure_column(cur, "events", "inside_geofence", "INTEGER")
+    ensure_column(cur, "events", "qualified_exposure", "INTEGER")
+    ensure_column(cur, "events", "device_id", "TEXT")
+    ensure_column(cur, "events", "asset_id", "TEXT")
+    ensure_column(cur, "events", "asset_type", "TEXT")
+    ensure_column(cur, "events", "site_id", "TEXT")
+    ensure_column(cur, "events", "creative_id", "TEXT")
+    ensure_column(cur, "events", "campaign_id", "TEXT")
+    ensure_column(cur, "events", "activation_name", "TEXT")
+    ensure_column(cur, "events", "uplink_type", "TEXT")
+    ensure_column(cur, "events", "fw_version", "TEXT")
+
+    ensure_column(cur, "devices", "device_id", "TEXT")
+    ensure_column(cur, "devices", "site_id", "TEXT")
+    ensure_column(cur, "devices", "asset_id", "TEXT")
+    ensure_column(cur, "devices", "asset_type", "TEXT")
+    ensure_column(cur, "devices", "fw_version", "TEXT")
+    ensure_column(cur, "devices", "assigned_fw_version", "TEXT")
+    ensure_column(cur, "devices", "auth_token", "TEXT")
+    ensure_column(cur, "devices", "uplink_type", "TEXT")
+    ensure_column(cur, "devices", "deployment_status", "TEXT")
+    ensure_column(cur, "devices", "last_seen", "INTEGER")
+    ensure_column(cur, "devices", "last_heartbeat_ts", "INTEGER")
+    ensure_column(cur, "devices", "health_status", "TEXT")
+    ensure_column(cur, "devices", "gps_fix", "INTEGER")
+    ensure_column(cur, "devices", "lat", "REAL")
+    ensure_column(cur, "devices", "lon", "REAL")
+    ensure_column(cur, "devices", "queue_depth", "INTEGER")
+    ensure_column(cur, "devices", "spool_bytes", "INTEGER")
+    ensure_column(cur, "devices", "dropped_presence", "INTEGER")
+    ensure_column(cur, "devices", "dropped_exit", "INTEGER")
+    ensure_column(cur, "devices", "upload_failures", "INTEGER")
+    ensure_column(cur, "devices", "wifi_status", "INTEGER")
+    ensure_column(cur, "devices", "modem_ready", "INTEGER")
+    ensure_column(cur, "devices", "ota_channel", "TEXT DEFAULT 'stable'")
+    ensure_column(cur, "devices", "ota_status", "TEXT")
+    ensure_column(cur, "devices", "ota_last_checked", "INTEGER")
+    ensure_column(cur, "devices", "ota_last_result", "TEXT")
+    ensure_column(cur, "devices", "ota_last_target_version", "TEXT")
+
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_events_event_id ON events(event_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_events_mac_hash ON events(mac_hash)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_events_received_ts ON events(received_ts)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_events_device_id ON events(device_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_events_qualified ON events(qualified_exposure)")
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_device_id ON devices(device_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_devices_last_seen ON devices(last_seen)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_ota_releases_active ON ota_releases(active, channel)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_partner_deliveries_status ON partner_deliveries(status, partner_name)")
@@ -200,14 +280,14 @@ def admin_auth_ok(req):
 
 
 def haversine_m(lat1, lon1, lat2, lon2):
-    R = 6371000.0
+    r = 6371000.0
     p1 = radians(lat1)
     p2 = radians(lat2)
     dlat = radians(lat2 - lat1)
     dlon = radians(lon2 - lon1)
     a = sin(dlat / 2) ** 2 + cos(p1) * cos(p2) * sin(dlon / 2) ** 2
     c = 2 * atan2(sqrt(a), sqrt(1 - a))
-    return R * c
+    return r * c
 
 
 def geofence_distance(lat, lon):
@@ -595,11 +675,14 @@ def export_csv():
     w = csv.writer(out)
     w.writerow(header)
     for r in rows:
-      w.writerow([r[h] for h in header])
+        w.writerow([r[h] for h in header])
 
     filename = f"events_{int(time.time())}.csv"
-    return Response(out.getvalue(), mimetype="text/csv",
-                    headers={"Content-Disposition": f"attachment; filename={filename}"})
+    return Response(
+        out.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 
 @app.get("/export.jsonl")
@@ -616,8 +699,11 @@ def export_jsonl():
             yield json.dumps(dict(r), ensure_ascii=False) + "\n"
 
     filename = f"events_{int(time.time())}.jsonl"
-    return Response(gen(), mimetype="application/x-ndjson",
-                    headers={"Content-Disposition": f"attachment; filename={filename}"})
+    return Response(
+        gen(),
+        mimetype="application/x-ndjson",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 
 @app.post("/ingest")
@@ -958,7 +1044,6 @@ def admin_gt_flush():
 
     for r in rows:
         pid = r["id"]
-        payload_json = r["payload_json"]
         attempt_no = (r["attempt_count"] or 0) + 1
         now_ts = int(time.time())
 
@@ -967,8 +1052,6 @@ def admin_gt_flush():
             response_code = 200
             response_body = "GT disabled; simulated success"
         else:
-            # Placeholder for real partner POST call
-            # Use requests.post(...) in a real connected environment
             status = "queued_external"
             response_code = 202
             response_body = "placeholder external delivery"
@@ -1001,7 +1084,8 @@ def firmware_download(filename):
     return send_from_directory(FIRMWARE_DIR, filename, as_attachment=True)
 
 
+init_db()
+
 if __name__ == "__main__":
-    init_db()
     port = int(os.environ.get("PORT", "5050"))
     socketio.run(app, host="0.0.0.0", port=port, allow_unsafe_werkzeug=True)
