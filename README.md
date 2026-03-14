@@ -6,6 +6,9 @@ It now includes a root `requirements.txt` and `Dockerfile` so Railway can build 
 ## Repo structure
 
 - `backend/app.py`
+- `backend/templates/dashboard.html`
+- `backend/static/dashboard.css`
+- `backend/static/dashboard.js`
 - `backend/requirements.txt`
 - `requirements.txt`
 - `Dockerfile`
@@ -22,6 +25,7 @@ It now includes a root `requirements.txt` and `Dockerfile` so Railway can build 
 5. Do not set `PORT` manually.
 6. Generate a service domain.
 7. Open `/api/health`.
+8. Open `/dashboard` for the integrated dashboard UI.
 
 ## Important note about storage
 
@@ -33,6 +37,7 @@ That file is ephemeral and may reset on redeploy or restart.
 - `/api/health`
 - `/api/stats`
 - `/api/events`
+- `/dashboard`
 - `/ingest`
 - `/api/ingest`
 
@@ -48,6 +53,8 @@ curl -X POST "https://YOUR_APP.up.railway.app/ingest" \
     "events":[{"event_type":"presence","count":1,"lat":17.43388,"lon":78.42669,"rssi":-62}]
   }'
 ```
+
+You can also send richer optional event fields such as `mac_hash`, `campaign_id`, `asset_id`, `creative_id`, `activation_name`, and `dwell_time_sec`.
 
 ## Firmware update before flashing
 

@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Footfall Intelligence Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-badge">FI</div>
+        <div>
+          <div class="brand-title">Footfall Intelligence</div>
+          <div class="brand-subtitle">Production Operations</div>
+        </div>
+      </div>
+
+      <nav class="side-nav">
+        <a class="nav-item active" href="#overview">Overview</a>
+        <a class="nav-item" href="#geospatial">Geospatial</a>
+        <a class="nav-item" href="#events">Event Stream</a>
+        <a class="nav-item" href="#devices">Assets</a>
+      </nav>
+
+      <div class="side-block">
+        <div class="side-label">Refresh</div>
+        <div class="refresh-row">
+          <select id="refreshInterval">
+            <option value="5000">5 sec</option>
+            <option value="10000" selected>10 sec</option>
+            <option value="15000">15 sec</option>
+            <option value="30000">30 sec</option>
+          </select>
+          <button id="refreshBtn">Refresh</button>
+        </div>
+      </div>
+
+      <div class="side-block">
+        <div class="side-label">Filters</div>
+        <label class="input-label">Device</label>
+        <select id="deviceFilter">
+          <option value="">All devices</option>
+        </select>
+        <label class="input-label">Event type</label>
+        <select id="eventTypeFilter">
+          <option value="">All events</option>
+          <option value="presence">Presence</option>
+          <option value="dwell">Dwell</option>
+          <option value="heartbeat">Heartbeat</option>
+        </select>
+      </div>
+
+      <div class="side-block system-health">
+        <div class="side-label">System health</div>
+        <div class="health-row"><span>API</span><span id="apiHealthBadge" class="pill pill-neutral">Checking</span></div>
+        <div class="health-row"><span>Database</span><span id="dbHealthBadge" class="pill pill-neutral">Checking</span></div>
+        <div class="health-row"><span>Last sync</span><span id="lastSyncText">-</span></div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar" id="overview">
+        <div>
+          <h1>Operations Dashboard</h1>
+          <p>Live telemetry, geospatial density, asset utilization, and footfall event quality.</p>
+        </div>
+        <div class="topbar-actions">
+          <button id="exportBtn" class="ghost-btn">Export CSV</button>
+        </div>
+      </header>
+
+      <section class="kpi-grid">
+        <article class="kpi-card emphasis">
+          <div class="kpi-label">Total Events</div>
+          <div class="kpi-value" id="totalEvents">0</div>
+          <div class="kpi-meta" id="eventsDelta">Live event volume</div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-label">Total Count</div>
+          <div class="kpi-value" id="totalCount">0</div>
+          <div class="kpi-meta">Aggregated event counts</div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-label">Unique Devices</div>
+          <div class="kpi-value" id="uniqueDevices">0</div>
+          <div class="kpi-meta">Distinct reporting assets</div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-label">Unique MAC Hashes</div>
+          <div class="kpi-value" id="uniqueMacHashes">0</div>
+          <div class="kpi-meta">Privacy-safe observed devices</div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-label">Total Dwell Time</div>
+          <div class="kpi-value" id="totalDwell">0 sec</div>
+          <div class="kpi-meta">Sum of dwell durations</div>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-label">Latest Activity</div>
+          <div class="kpi-value small" id="latestEventText">No data</div>
+          <div class="kpi-meta">Most recent event snapshot</div>
+        </article>
+      </section>
+
+      <section class="chart-grid">
+        <article class="panel wide">
+          <div class="panel-head">
+            <div>
+              <h2>Event Volume Trend</h2>
+              <p>Recent activity grouped over time.</p>
+            </div>
+          </div>
+          <canvas id="trendChart"></canvas>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Event Type Mix</h2>
+              <p>Presence vs dwell vs heartbeat.</p>
+            </div>
+          </div>
+          <canvas id="eventMixChart"></canvas>
+        </article>
+      </section>
+
+      <section class="geo-grid" id="geospatial">
+        <article class="panel map-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Heat Map</h2>
+              <p>Spatial density of observed events.</p>
+            </div>
+            <div class="panel-actions">
+              <button id="fitBoundsBtn" class="ghost-btn small">Fit Bounds</button>
+            </div>
+          </div>
+          <div id="heatmap"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Asset & Campaign Performance</h2>
+              <p>Top emitting combinations from current feed.</p>
+            </div>
+          </div>
+          <div class="list-table" id="assetPerformance"></div>
+        </article>
+      </section>
+
+      <section class="chart-grid" id="devices">
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Device Throughput</h2>
+              <p>Event counts by reporting device.</p>
+            </div>
+          </div>
+          <canvas id="deviceChart"></canvas>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Dwell Analytics</h2>
+              <p>Dwell time distribution from current records.</p>
+            </div>
+          </div>
+          <canvas id="dwellChart"></canvas>
+        </article>
+      </section>
+
+      <section class="panel" id="events">
+        <div class="panel-head">
+          <div>
+            <h2>Live Event Stream</h2>
+            <p>Detailed event feed with location, campaign, and dwell context.</p>
+          </div>
+          <div class="table-meta" id="tableMeta">0 rows</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Time</th>
+                <th>Device</th>
+                <th>Type</th>
+                <th>Count</th>
+                <th>RSSI</th>
+                <th>Latitude</th>
+                <th>Longitude</th>
+                <th>MAC Hash</th>
+                <th>Campaign</th>
+                <th>Asset</th>
+                <th>Creative</th>
+                <th>Dwell</th>
+              </tr>
+            </thead>
+            <tbody id="eventsTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+</body>
+</html>
