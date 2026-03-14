@@ -18,12 +18,16 @@ app = Flask(__name__)
 
 
 def get_db():
-    db_dir = os.path.dirname(DB_PATH)
-    if db_dir:
-        os.makedirs(db_dir, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def ensure_column(conn, table_name, column_name, column_def):
+    cols = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    existing = {row["name"] for row in cols}
+    if column_name not in existing:
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_def}")
 
 
 def init_db():
@@ -39,6 +43,7 @@ def init_db():
                 longitude REAL,
                 rssi INTEGER,
                 firmware_version TEXT,
+                timestamp_epoch INTEGER,
                 created_at INTEGER NOT NULL
             );
 
@@ -51,6 +56,15 @@ def init_db():
             );
             """
         )
+
+        # Backward-compatible schema upgrades
+        ensure_column(conn, "device_events", "mac_hash", "TEXT")
+        ensure_column(conn, "device_events", "campaign_id", "INTEGER")
+        ensure_column(conn, "device_events", "asset_id", "TEXT")
+        ensure_column(conn, "device_events", "creative_id", "TEXT")
+        ensure_column(conn, "device_events", "activation_name", "TEXT")
+        ensure_column(conn, "device_events", "dwell_time_sec", "INTEGER DEFAULT 0")
+
         conn.commit()
 
 
@@ -65,8 +79,7 @@ def bearer_token():
 
 
 def admin_authorized():
-    token = bearer_token()
-    return token == ADMIN_API_KEY
+    return bearer_token() == ADMIN_API_KEY
 
 
 @app.get("/")
@@ -79,6 +92,7 @@ def health():
     try:
         with closing(get_db()) as conn:
             row = conn.execute("SELECT COUNT(*) AS c FROM device_events").fetchone()
+
         return jsonify(
             {
                 "ok": True,
@@ -112,6 +126,7 @@ def ingest():
 
     payload = request.get_json(silent=True) or {}
     device_id = str(payload.get("device_id", "unknown-device"))
+    firmware_version = str(payload.get("firmware_version", "unknown"))
     events = payload.get("events") or []
 
     if not isinstance(events, list):
@@ -119,25 +134,64 @@ def ingest():
 
     now = int(time.time())
     inserted = 0
+
     with closing(get_db()) as conn:
         for evt in events:
             if not isinstance(evt, dict):
                 continue
+
+            event_type = str(evt.get("event_type", "presence"))
+            count_value = int(evt.get("count", 1))
+            latitude = evt.get("lat")
+            longitude = evt.get("lon")
+            rssi = evt.get("rssi")
+            timestamp_epoch = int(evt.get("timestamp", now)) if evt.get("timestamp") is not None else now
+
+            mac_hash = evt.get("mac_hash")
+            campaign_id = evt.get("campaign_id")
+            asset_id = evt.get("asset_id")
+            creative_id = evt.get("creative_id")
+            activation_name = evt.get("activation_name")
+            dwell_time_sec = int(evt.get("dwell_time_sec", 0))
+
             conn.execute(
                 """
                 INSERT INTO device_events
-                (device_id, event_type, count_value, latitude, longitude, rssi, firmware_version, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (
+                    device_id,
+                    event_type,
+                    count_value,
+                    latitude,
+                    longitude,
+                    rssi,
+                    firmware_version,
+                    timestamp_epoch,
+                    created_at,
+                    mac_hash,
+                    campaign_id,
+                    asset_id,
+                    creative_id,
+                    activation_name,
+                    dwell_time_sec
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     device_id,
-                    str(evt.get("event_type", "presence")),
-                    int(evt.get("count", 1)),
-                    evt.get("lat"),
-                    evt.get("lon"),
-                    evt.get("rssi"),
-                    str(payload.get("firmware_version", "unknown")),
-                    int(evt.get("timestamp", now)),
+                    event_type,
+                    count_value,
+                    latitude,
+                    longitude,
+                    rssi,
+                    firmware_version,
+                    timestamp_epoch,
+                    now,
+                    mac_hash,
+                    campaign_id,
+                    asset_id,
+                    creative_id,
+                    activation_name,
+                    dwell_time_sec,
                 ),
             )
             inserted += 1
@@ -154,16 +208,34 @@ def ingest():
 @app.get("/api/events")
 def events():
     limit = min(max(int(request.args.get("limit", 100)), 1), 1000)
+
     with closing(get_db()) as conn:
         rows = conn.execute(
             """
-            SELECT id, device_id, event_type, count_value, latitude, longitude, rssi, firmware_version, created_at
+            SELECT
+                id,
+                device_id,
+                event_type,
+                count_value,
+                latitude,
+                longitude,
+                rssi,
+                firmware_version,
+                timestamp_epoch,
+                created_at,
+                mac_hash,
+                campaign_id,
+                asset_id,
+                creative_id,
+                activation_name,
+                dwell_time_sec
             FROM device_events
             ORDER BY id DESC
             LIMIT ?
             """,
             (limit,),
         ).fetchall()
+
     return jsonify([
         {
             "id": row["id"],
@@ -174,7 +246,14 @@ def events():
             "lon": row["longitude"],
             "rssi": row["rssi"],
             "firmware_version": row["firmware_version"],
-            "timestamp": row["created_at"],
+            "timestamp": row["timestamp_epoch"],
+            "created_at": row["created_at"],
+            "mac_hash": row["mac_hash"],
+            "campaign_id": row["campaign_id"],
+            "asset_id": row["asset_id"],
+            "creative_id": row["creative_id"],
+            "activation_name": row["activation_name"],
+            "dwell_time_sec": row["dwell_time_sec"],
         }
         for row in rows
     ])
@@ -183,25 +262,66 @@ def events():
 @app.get("/api/stats")
 def stats():
     with closing(get_db()) as conn:
-        total_events = conn.execute("SELECT COUNT(*) AS c FROM device_events").fetchone()["c"]
-        total_count = conn.execute("SELECT COALESCE(SUM(count_value), 0) AS s FROM device_events").fetchone()["s"]
-        unique_devices = conn.execute("SELECT COUNT(DISTINCT device_id) AS c FROM device_events").fetchone()["c"]
+        total_events = conn.execute(
+            "SELECT COUNT(*) AS c FROM device_events"
+        ).fetchone()["c"]
+
+        total_count = conn.execute(
+            "SELECT COALESCE(SUM(count_value), 0) AS s FROM device_events"
+        ).fetchone()["s"]
+
+        unique_devices = conn.execute(
+            "SELECT COUNT(DISTINCT device_id) AS c FROM device_events"
+        ).fetchone()["c"]
+
+        unique_mac_hashes = conn.execute(
+            "SELECT COUNT(DISTINCT mac_hash) AS c FROM device_events WHERE mac_hash IS NOT NULL AND mac_hash != ''"
+        ).fetchone()["c"]
+
+        total_dwell = conn.execute(
+            "SELECT COALESCE(SUM(dwell_time_sec), 0) AS s FROM device_events"
+        ).fetchone()["s"]
+
         latest = conn.execute(
-            "SELECT device_id, event_type, count_value, created_at FROM device_events ORDER BY id DESC LIMIT 1"
+            """
+            SELECT
+                device_id,
+                event_type,
+                count_value,
+                timestamp_epoch,
+                mac_hash,
+                campaign_id,
+                asset_id,
+                creative_id,
+                activation_name,
+                dwell_time_sec
+            FROM device_events
+            ORDER BY id DESC
+            LIMIT 1
+            """
         ).fetchone()
+
     return jsonify(
         {
             "ok": True,
             "total_events": int(total_events),
             "total_count": int(total_count),
             "unique_devices": int(unique_devices),
+            "unique_mac_hashes": int(unique_mac_hashes),
+            "total_dwell_time_sec": int(total_dwell),
             "latest_event": None
             if latest is None
             else {
                 "device_id": latest["device_id"],
                 "event_type": latest["event_type"],
                 "count": latest["count_value"],
-                "timestamp": latest["created_at"],
+                "timestamp": latest["timestamp_epoch"],
+                "mac_hash": latest["mac_hash"],
+                "campaign_id": latest["campaign_id"],
+                "asset_id": latest["asset_id"],
+                "creative_id": latest["creative_id"],
+                "activation_name": latest["activation_name"],
+                "dwell_time_sec": latest["dwell_time_sec"],
             },
         }
     )
@@ -215,18 +335,67 @@ def export_csv():
     with closing(get_db()) as conn:
         rows = conn.execute(
             """
-            SELECT id, device_id, event_type, count_value, latitude, longitude, rssi, firmware_version, created_at
-            FROM device_events ORDER BY id DESC
+            SELECT
+                id,
+                device_id,
+                event_type,
+                count_value,
+                latitude,
+                longitude,
+                rssi,
+                firmware_version,
+                timestamp_epoch,
+                created_at,
+                mac_hash,
+                campaign_id,
+                asset_id,
+                creative_id,
+                activation_name,
+                dwell_time_sec
+            FROM device_events
+            ORDER BY id DESC
             """
         ).fetchall()
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["id", "device_id", "event_type", "count", "lat", "lon", "rssi", "firmware_version", "timestamp"])
+    writer.writerow([
+        "id",
+        "device_id",
+        "event_type",
+        "count",
+        "lat",
+        "lon",
+        "rssi",
+        "firmware_version",
+        "timestamp",
+        "created_at",
+        "mac_hash",
+        "campaign_id",
+        "asset_id",
+        "creative_id",
+        "activation_name",
+        "dwell_time_sec",
+    ])
+
     for row in rows:
         writer.writerow([
-            row["id"], row["device_id"], row["event_type"], row["count_value"], row["latitude"],
-            row["longitude"], row["rssi"], row["firmware_version"], row["created_at"]
+            row["id"],
+            row["device_id"],
+            row["event_type"],
+            row["count_value"],
+            row["latitude"],
+            row["longitude"],
+            row["rssi"],
+            row["firmware_version"],
+            row["timestamp_epoch"],
+            row["created_at"],
+            row["mac_hash"],
+            row["campaign_id"],
+            row["asset_id"],
+            row["creative_id"],
+            row["activation_name"],
+            row["dwell_time_sec"],
         ])
 
     return Response(
