@@ -92,6 +92,7 @@ static double   g_lon = 0.0;
 static uint64_t g_lastUtc = 0;
 static uint64_t g_lastUtc_up_s = 0;
 static uint32_t g_lastGnssMs = 0;
+static uint32_t g_lastFixMs = 0;
 
 static BLEScan* pBLEScan = nullptr;
 static bool     g_sniffer_on = false;
@@ -259,7 +260,8 @@ static void fillEventTimeAndGps(FootfallEvent& ev) {
     epochToIsoUtc(utc, ev.timestamp_utc);
   }
 
-  if (g_fix && g_lastUtc != 0 && (up_s() - g_lastUtc_up_s) <= GNSS_STALE_SEC) {
+  bool gpsFresh = g_lastFixMs != 0 && (millis() - g_lastFixMs) <= (GNSS_STALE_SEC * 1000UL);
+  if (g_fix && gpsFresh) {
     ev.gps_fix = true;
     ev.lat     = g_lat;
     ev.lon     = g_lon;
@@ -707,6 +709,7 @@ static bool gnssPoll() {
       g_fix = true;
       g_lat = lat;
       g_lon = lon;
+      g_lastFixMs = millis();
 
       if (f >= 10 && fields[9].length() == 6 && fields[0].length() >= 6) {
         struct tm tm_utc = {};
@@ -729,7 +732,11 @@ static bool gnssPoll() {
       }
 
       Serial.printf("[GNSS] fix lat=%.6f lon=%.6f\n", g_lat, g_lon);
+    } else {
+      g_fix = false;
     }
+  } else {
+    g_fix = false;
   }
 
   return true;
