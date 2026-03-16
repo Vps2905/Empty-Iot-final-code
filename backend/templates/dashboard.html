@@ -3,214 +3,361 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Footfall Intelligence Dashboard</title>
+  <title>Footfall Intelligence — Full Pipeline Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}" />
 </head>
 <body>
   <div class="app-shell">
+    <!-- ─── Sidebar ─── -->
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-badge">FI</div>
+        <div class="brand-badge">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        </div>
         <div>
           <div class="brand-title">Footfall Intelligence</div>
-          <div class="brand-subtitle">Production Operations</div>
+          <div class="brand-subtitle">End-to-End Platform</div>
         </div>
       </div>
 
       <nav class="side-nav">
-        <a class="nav-item active" href="#overview">Overview</a>
-        <a class="nav-item" href="#geospatial">Geospatial</a>
-        <a class="nav-item" href="#events">Event Stream</a>
-        <a class="nav-item" href="#devices">Assets</a>
+        <a class="nav-item active" data-tab="overview" href="#overview">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+          Overview
+        </a>
+        <a class="nav-item" data-tab="pipeline" href="#pipeline">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          Pipeline
+        </a>
+        <a class="nav-item" data-tab="audience" href="#audience">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Audience
+        </a>
+        <a class="nav-item" data-tab="partners" href="#partners">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          Partners
+        </a>
+        <a class="nav-item" data-tab="dsp" href="#dsp">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          DSP Viewer
+        </a>
+        <a class="nav-item" data-tab="geospatial" href="#geospatial">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          Geospatial
+        </a>
+        <a class="nav-item" data-tab="events" href="#events">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+          Events
+        </a>
       </nav>
 
       <div class="side-block">
-        <div class="side-label">Refresh</div>
+        <div class="side-label">Controls</div>
         <div class="refresh-row">
           <select id="refreshInterval">
             <option value="5000">5 sec</option>
             <option value="10000" selected>10 sec</option>
-            <option value="15000">15 sec</option>
             <option value="30000">30 sec</option>
           </select>
           <button id="refreshBtn">Refresh</button>
         </div>
       </div>
 
-      <div class="side-block">
-        <div class="side-label">Filters</div>
-        <label class="input-label">Device</label>
-        <select id="deviceFilter">
-          <option value="">All devices</option>
-        </select>
-        <label class="input-label">Event type</label>
-        <select id="eventTypeFilter">
-          <option value="">All events</option>
-          <option value="presence">Presence</option>
-          <option value="dwell">Dwell</option>
-          <option value="heartbeat">Heartbeat</option>
-        </select>
-      </div>
-
       <div class="side-block system-health">
-        <div class="side-label">System health</div>
-        <div class="health-row"><span>API</span><span id="apiHealthBadge" class="pill pill-neutral">Checking</span></div>
-        <div class="health-row"><span>Database</span><span id="dbHealthBadge" class="pill pill-neutral">Checking</span></div>
+        <div class="side-label">System</div>
+        <div class="health-row"><span>API</span><span id="apiHealthBadge" class="pill pill-neutral">…</span></div>
+        <div class="health-row"><span>Database</span><span id="dbHealthBadge" class="pill pill-neutral">…</span></div>
+        <div class="health-row"><span>Foursquare</span><span id="fsqHealthBadge" class="pill pill-neutral">…</span></div>
         <div class="health-row"><span>Last sync</span><span id="lastSyncText">-</span></div>
       </div>
     </aside>
 
+    <!-- ─── Main Content ─── -->
     <main class="main-content">
-      <header class="topbar" id="overview">
-        <div>
-          <h1>Operations Dashboard</h1>
-          <p>Live telemetry, geospatial density, asset utilization, and footfall event quality.</p>
-        </div>
-        <div class="topbar-actions">
-          <button id="exportBtn" class="ghost-btn">Export CSV</button>
-        </div>
-      </header>
 
-      <section class="kpi-grid">
-        <article class="kpi-card emphasis">
-          <div class="kpi-label">Total Events</div>
-          <div class="kpi-value" id="totalEvents">0</div>
-          <div class="kpi-meta" id="eventsDelta">Live event volume</div>
-        </article>
-        <article class="kpi-card">
-          <div class="kpi-label">Total Count</div>
-          <div class="kpi-value" id="totalCount">0</div>
-          <div class="kpi-meta">Aggregated event counts</div>
-        </article>
-        <article class="kpi-card">
-          <div class="kpi-label">Unique Devices</div>
-          <div class="kpi-value" id="uniqueDevices">0</div>
-          <div class="kpi-meta">Distinct reporting assets</div>
-        </article>
-        <article class="kpi-card">
-          <div class="kpi-label">Unique MAC Hashes</div>
-          <div class="kpi-value" id="uniqueMacHashes">0</div>
-          <div class="kpi-meta">Privacy-safe observed devices</div>
-        </article>
-        <article class="kpi-card">
-          <div class="kpi-label">Total Dwell Time</div>
-          <div class="kpi-value" id="totalDwell">0 sec</div>
-          <div class="kpi-meta">Sum of dwell durations</div>
-        </article>
-        <article class="kpi-card">
-          <div class="kpi-label">Latest Activity</div>
-          <div class="kpi-value small" id="latestEventText">No data</div>
-          <div class="kpi-meta">Most recent event snapshot</div>
-        </article>
+      <!-- ===== TAB: OVERVIEW ===== -->
+      <section class="tab-panel active" id="tab-overview">
+        <header class="topbar">
+          <div>
+            <h1>Operations Overview</h1>
+            <p>Real-time IoT telemetry, audience qualification, partner distribution, and ad delivery.</p>
+          </div>
+          <div class="topbar-actions">
+            <button id="exportBtn" class="ghost-btn">Export CSV</button>
+          </div>
+        </header>
+
+        <section class="kpi-grid">
+          <article class="kpi-card emphasis">
+            <div class="kpi-label">Raw Events</div>
+            <div class="kpi-value" id="totalEvents">0</div>
+            <div class="kpi-meta">IoT device detections</div>
+          </article>
+          <article class="kpi-card">
+            <div class="kpi-label">Unique MACs</div>
+            <div class="kpi-value" id="uniqueMacHashes">0</div>
+            <div class="kpi-meta">Privacy-safe hashed IDs</div>
+          </article>
+          <article class="kpi-card">
+            <div class="kpi-label">Audience Qualified</div>
+            <div class="kpi-value" id="audienceCount">0</div>
+            <div class="kpi-meta">Passed confidence threshold</div>
+          </article>
+          <article class="kpi-card">
+            <div class="kpi-label">Partner Exports</div>
+            <div class="kpi-value" id="partnerExports">0</div>
+            <div class="kpi-meta">LiveRamp + GroundTruth</div>
+          </article>
+          <article class="kpi-card">
+            <div class="kpi-label">Ad Impressions</div>
+            <div class="kpi-value" id="dspImpressions">0</div>
+            <div class="kpi-meta">Mock DSP served</div>
+          </article>
+          <article class="kpi-card">
+            <div class="kpi-label">Total Dwell</div>
+            <div class="kpi-value" id="totalDwell">0s</div>
+            <div class="kpi-meta">Aggregate dwell time</div>
+          </article>
+        </section>
+
+        <section class="chart-grid">
+          <article class="panel wide">
+            <div class="panel-head">
+              <div><h2>Event Volume Trend</h2><p>Recent activity grouped over time.</p></div>
+            </div>
+            <canvas id="trendChart"></canvas>
+          </article>
+          <article class="panel">
+            <div class="panel-head">
+              <div><h2>Event Type Mix</h2><p>Presence vs dwell vs heartbeat.</p></div>
+            </div>
+            <canvas id="eventMixChart"></canvas>
+          </article>
+        </section>
       </section>
 
-      <section class="chart-grid">
-        <article class="panel wide">
-          <div class="panel-head">
-            <div>
-              <h2>Event Volume Trend</h2>
-              <p>Recent activity grouped over time.</p>
-            </div>
+      <!-- ===== TAB: PIPELINE ===== -->
+      <section class="tab-panel" id="tab-pipeline">
+        <header class="topbar">
+          <div>
+            <h1>Full Pipeline</h1>
+            <p>IoT → Audience → Enrichment → Partner Export → Ad Delivery. One-click activation.</p>
           </div>
-          <canvas id="trendChart"></canvas>
-        </article>
+          <div class="topbar-actions">
+            <button id="runPipelineBtn" class="accent-btn">Run Full Pipeline</button>
+          </div>
+        </header>
 
+        <div id="pipelineStatus" class="pipeline-status" style="display:none;"></div>
+
+        <!-- Funnel visualization -->
+        <div class="funnel-container">
+          <div class="funnel-step">
+            <div class="funnel-icon">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg>
+            </div>
+            <div class="funnel-count" id="funnel-raw">0</div>
+            <div class="funnel-label">Raw Events</div>
+            <div class="funnel-sub">WiFi + BLE probes</div>
+          </div>
+          <div class="funnel-arrow">→</div>
+          <div class="funnel-step">
+            <div class="funnel-icon icon-audience">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/></svg>
+            </div>
+            <div class="funnel-count" id="funnel-qualified">0</div>
+            <div class="funnel-label">Audience Qualified</div>
+            <div class="funnel-sub">Confidence ≥ 50%</div>
+          </div>
+          <div class="funnel-arrow">→</div>
+          <div class="funnel-step">
+            <div class="funnel-icon icon-fsq">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+            </div>
+            <div class="funnel-count" id="funnel-enriched">0</div>
+            <div class="funnel-label">Foursquare Enriched</div>
+            <div class="funnel-sub">Real POI data</div>
+          </div>
+          <div class="funnel-arrow">→</div>
+          <div class="funnel-step">
+            <div class="funnel-icon icon-lr">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10"/></svg>
+            </div>
+            <div class="funnel-count" id="funnel-lr">0</div>
+            <div class="funnel-label">LiveRamp Sim</div>
+            <div class="funnel-sub">Segment export</div>
+          </div>
+          <div class="funnel-arrow">→</div>
+          <div class="funnel-step">
+            <div class="funnel-icon icon-gt">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            </div>
+            <div class="funnel-count" id="funnel-gt">0</div>
+            <div class="funnel-label">GroundTruth Sim</div>
+            <div class="funnel-sub">Location audience</div>
+          </div>
+          <div class="funnel-arrow">→</div>
+          <div class="funnel-step">
+            <div class="funnel-icon icon-dsp">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            </div>
+            <div class="funnel-count" id="funnel-impressions">0</div>
+            <div class="funnel-label">DSP Impressions</div>
+            <div class="funnel-sub">Mock ad delivery</div>
+          </div>
+        </div>
+
+        <section class="chart-grid">
+          <article class="panel wide">
+            <div class="panel-head"><div><h2>Recent Partner Exports</h2><p>Latest handoffs to simulated partners.</p></div></div>
+            <div class="table-wrap compact" id="recentExportsTable">
+              <p class="muted-text">Run the pipeline to see exports here.</p>
+            </div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div><h2>Audience Confidence</h2><p>Distribution of qualification scores.</p></div></div>
+            <canvas id="confidenceChart"></canvas>
+          </article>
+        </section>
+      </section>
+
+      <!-- ===== TAB: AUDIENCE ===== -->
+      <section class="tab-panel" id="tab-audience">
+        <header class="topbar">
+          <div><h1>Audience Builder</h1><p>Qualified device profiles from IoT detection. Automatically scored on ingestion.</p></div>
+        </header>
+        <section class="kpi-grid kpi-3">
+          <article class="kpi-card emphasis">
+            <div class="kpi-label">Total Qualified</div>
+            <div class="kpi-value" id="aud-total">0</div>
+          </article>
+          <article class="kpi-card">
+            <div class="kpi-label">Avg Confidence</div>
+            <div class="kpi-value" id="aud-avg-conf">0%</div>
+          </article>
+          <article class="kpi-card">
+            <div class="kpi-label">Avg Dwell</div>
+            <div class="kpi-value" id="aud-avg-dwell">0s</div>
+          </article>
+        </section>
         <article class="panel">
-          <div class="panel-head">
-            <div>
-              <h2>Event Type Mix</h2>
-              <p>Presence vs dwell vs heartbeat.</p>
-            </div>
-          </div>
-          <canvas id="eventMixChart"></canvas>
+          <div class="panel-head"><div><h2>Audience Candidates</h2></div></div>
+          <div class="table-wrap" id="audienceTable"><p class="muted-text">Loading…</p></div>
         </article>
       </section>
 
-      <section class="geo-grid" id="geospatial">
-        <article class="panel map-panel">
-          <div class="panel-head">
-            <div>
-              <h2>Heat Map</h2>
-              <p>Spatial density of observed events.</p>
-            </div>
-            <div class="panel-actions">
-              <button id="fitBoundsBtn" class="ghost-btn small">Fit Bounds</button>
-            </div>
+      <!-- ===== TAB: PARTNERS ===== -->
+      <section class="tab-panel" id="tab-partners">
+        <header class="topbar">
+          <div><h1>Partner Integrations</h1><p>Foursquare (real API), LiveRamp (simulated), GroundTruth (simulated).</p></div>
+          <div class="topbar-actions">
+            <button id="enrichFsqBtn" class="ghost-btn">Enrich via Foursquare</button>
+            <button id="pushLrBtn" class="ghost-btn">Push to LiveRamp</button>
+            <button id="pushGtBtn" class="ghost-btn">Push to GroundTruth</button>
           </div>
+        </header>
+        <div id="partnerActionStatus" class="pipeline-status" style="display:none;"></div>
+        <section class="chart-grid">
+          <article class="panel wide">
+            <div class="panel-head"><div><h2>Foursquare POI Enrichment</h2><p>Nearby places from real API.</p></div></div>
+            <div class="table-wrap compact" id="fsqTable"><p class="muted-text">Click "Enrich via Foursquare" to populate.</p></div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div><h2>Export Breakdown</h2></div></div>
+            <canvas id="partnerBreakdownChart"></canvas>
+          </article>
+        </section>
+        <article class="panel">
+          <div class="panel-head"><div><h2>All Partner Exports</h2></div></div>
+          <div class="table-wrap compact" id="allExportsTable"><p class="muted-text">Loading…</p></div>
+        </article>
+      </section>
+
+      <!-- ===== TAB: DSP VIEWER ===== -->
+      <section class="tab-panel" id="tab-dsp">
+        <header class="topbar">
+          <div><h1>Mock DSP Ad Viewer</h1><p>Simulate retargeted ad delivery for audience-matched devices.</p></div>
+        </header>
+        <div class="dsp-controls">
+          <div class="dsp-input-group">
+            <label>device_hash (mac_hash from audience)</label>
+            <input id="dspDeviceHash" type="text" placeholder="Paste a mac_hash from the Audience tab…" />
+          </div>
+          <div class="dsp-input-group">
+            <label>campaign_id (optional)</label>
+            <input id="dspCampaignId" type="text" placeholder="e.g. 1001" />
+          </div>
+          <button id="loadAdBtn" class="accent-btn">Load Retargeted Ad</button>
+        </div>
+        <div class="dsp-ad-container">
+          <div class="dsp-ad-label">Ad Slot</div>
+          <div id="dspAdSlot" class="dsp-ad-slot">
+            <p class="muted-text">No ad loaded yet. Paste a mac_hash from an audience-qualified device above.</p>
+          </div>
+        </div>
+        <article class="panel">
+          <div class="panel-head"><div><h2>Raw API Response</h2></div></div>
+          <pre id="dspRawResponse" class="code-block">{}</pre>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><div><h2>Impression Log</h2></div></div>
+          <div class="table-wrap compact" id="impressionTable"><p class="muted-text">Impressions appear after ads are loaded.</p></div>
+        </article>
+      </section>
+
+      <!-- ===== TAB: GEOSPATIAL ===== -->
+      <section class="tab-panel" id="tab-geospatial">
+        <header class="topbar">
+          <div><h1>Geospatial Intelligence</h1><p>Heatmap and marker overlay of observed events.</p></div>
+          <div class="topbar-actions"><button id="fitBoundsBtn" class="ghost-btn">Fit Bounds</button></div>
+        </header>
+        <article class="panel map-panel">
           <div id="heatmap"></div>
         </article>
-
         <article class="panel">
-          <div class="panel-head">
-            <div>
-              <h2>Asset & Campaign Performance</h2>
-              <p>Top emitting combinations from current feed.</p>
-            </div>
-          </div>
+          <div class="panel-head"><div><h2>Asset & Campaign Performance</h2></div></div>
           <div class="list-table" id="assetPerformance"></div>
         </article>
       </section>
 
-      <section class="chart-grid" id="devices">
-        <article class="panel">
-          <div class="panel-head">
-            <div>
-              <h2>Device Throughput</h2>
-              <p>Event counts by reporting device.</p>
-            </div>
+      <!-- ===== TAB: EVENTS ===== -->
+      <section class="tab-panel" id="tab-events">
+        <header class="topbar">
+          <div><h1>Live Event Stream</h1><p>All raw device events with full metadata.</p></div>
+          <div class="topbar-actions">
+            <select id="deviceFilter"><option value="">All devices</option></select>
+            <select id="eventTypeFilter">
+              <option value="">All events</option>
+              <option value="presence">Presence</option>
+              <option value="dwell">Dwell</option>
+              <option value="heartbeat">Heartbeat</option>
+            </select>
           </div>
-          <canvas id="deviceChart"></canvas>
-        </article>
-
+        </header>
         <article class="panel">
-          <div class="panel-head">
-            <div>
-              <h2>Dwell Analytics</h2>
-              <p>Dwell time distribution from current records.</p>
-            </div>
+          <div class="panel-head"><div><h2>Events</h2></div><div class="table-meta" id="tableMeta">0 rows</div></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th><th>Time</th><th>Device</th><th>Type</th><th>RSSI</th>
+                  <th>Lat</th><th>Lon</th><th>MAC Hash</th><th>Campaign</th>
+                  <th>Asset</th><th>Creative</th><th>Dwell</th>
+                </tr>
+              </thead>
+              <tbody id="eventsTableBody"></tbody>
+            </table>
           </div>
-          <canvas id="dwellChart"></canvas>
         </article>
       </section>
 
-      <section class="panel" id="events">
-        <div class="panel-head">
-          <div>
-            <h2>Live Event Stream</h2>
-            <p>Detailed event feed with location, campaign, and dwell context.</p>
-          </div>
-          <div class="table-meta" id="tableMeta">0 rows</div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Time</th>
-                <th>Device</th>
-                <th>Type</th>
-                <th>Count</th>
-                <th>RSSI</th>
-                <th>Latitude</th>
-                <th>Longitude</th>
-                <th>MAC Hash</th>
-                <th>Campaign</th>
-                <th>Asset</th>
-                <th>Creative</th>
-                <th>Dwell</th>
-              </tr>
-            </thead>
-            <tbody id="eventsTableBody"></tbody>
-          </table>
-        </div>
-      </section>
     </main>
   </div>
 
