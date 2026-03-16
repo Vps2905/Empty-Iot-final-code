@@ -36,10 +36,16 @@ AQ_MIN_RSSI = float(os.environ.get("AQ_MIN_RSSI", "-85"))
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
+DB_INIT_ERROR = None
 
 
 # --- Database helpers (PostgreSQL) ---
 def get_db():
+    if not DATABASE_URL.strip():
+        raise RuntimeError(
+            "DATABASE_URL is not set. Configure Railway with "
+            "DATABASE_URL=${{Postgres.DATABASE_URL}}."
+        )
     conn = psycopg2.connect(DATABASE_URL)
     conn.autocommit = False
     return conn
@@ -190,7 +196,11 @@ def init_db():
     finally:
         conn.close()
 
-init_db()
+try:
+    init_db()
+except Exception as exc:
+    DB_INIT_ERROR = str(exc)
+    print(f"[DB] Startup warning: {DB_INIT_ERROR}")
 
 
 # --- Helpers ---
@@ -228,6 +238,16 @@ def dashboard():
 
 @app.get("/api/health")
 def health():
+    if DB_INIT_ERROR:
+        return jsonify({
+            "ok": False,
+            "service": "footfall-platform",
+            "database": "unavailable",
+            "database_configured": bool(DATABASE_URL.strip()),
+            "error": DB_INIT_ERROR,
+            "timestamp": int(time.time()),
+        }), 503
+
     try:
         ev = db_fetchone("SELECT COUNT(*) AS c FROM device_events")["c"]
         au = db_fetchone("SELECT COUNT(*) AS c FROM audience_candidates")["c"]
